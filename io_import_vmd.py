@@ -25,8 +25,8 @@ import bpy
 import bpy_extras
 try:
 	from meshio.pymeshio import englishmap
-	boneNameMap = dict( (t[1], t[0]) for t in englishmap.boneMap ) 
-	faceNameMap = dict( (t[1], t[0]) for t in englishmap.skinMap ) 
+	boneNameMap = { t[1]: t[0] for t in englishmap.boneMap }
+	faceNameMap = { t[1]: t[0] for t in englishmap.skinMap }
 except:
 	print( "MeshIO is not found." )
 	boneNameMap = {}
