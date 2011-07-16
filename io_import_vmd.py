@@ -15,7 +15,7 @@
 #     - http://blog.goo.ne.jp/torisu_tetosuki/e/bc9f1c4d597341b394bd02b64597499d
 #     - http://harigane.at.webry.info/201103/article_1.html
 #
-# This program can be used with excellent MMD importer "MeshIO":
+# This program can be used with excellent PMD importer "MeshIO":
 #     - http://sourceforge.jp/projects/meshio/
 
 import io
@@ -38,6 +38,12 @@ bl_info = {
 	"category": "Import-Export",
 }
 
+
+def choice1( it, cond ):
+	for e in it:
+		if cond( e ):
+			return e
+	return None
 
 def readPacked( ofs, fmt ):
 	return struct.unpack( fmt, ofs.read( struct.calcsize( fmt ) ) )
@@ -123,40 +129,32 @@ def importVmd( ofs, bone, face, offset = 0 ):
 class VmdImporter( bpy.types.Operator, bpy_extras.io_utils.ImportHelper ):
 	bl_idname    = "import_anim.vmd"
 	bl_label     = "Import VMD"
-	filename_ext = ".vmd"
 	filter_glob  = bpy.props.StringProperty( default = "*.vmd", options = { "HIDDEN" } )
 	frame_offset = bpy.props.IntProperty( name = "Frame offset", default = 1 )
 
 	def execute( self, ctx ):
-		for obj in bpy.context.selected_objects:
-			if hasattr( obj.data, "bones" ) and obj.data.bones:
-				bone = obj
-				break
-		else:
-			bone = None
-
-		for obj in bpy.context.selected_objects:
-			if hasattr( obj.data, "shape_keys" ) and obj.data.shape_keys:
-				face = obj
-				break
-		else:
-			face = None
+		bone = choice1( bpy.context.selected_objects, lambda obj:
+			hasattr( obj.data, "bones" ) and obj.data.bones
+		)
+		face = choice1( bpy.context.selected_objects, lambda obj:
+			hasattr( obj.data, "shape_keys" ) and obj.data.shape_keys
+		)
 
 		with io.FileIO( self.filepath ) as ofs:
 			importVmd( ofs, bone, face, self.frame_offset )
 
 		return { "FINISHED" }
 
-def menu_func( self, ctx ):
+def menuFunc( self, ctx ):
 	self.layout.operator( VmdImporter.bl_idname, text = "Vocaloid Motion Data (.vmd)" )
 
 def register():
 	bpy.utils.register_class( VmdImporter )
-	bpy.types.INFO_MT_file_import.append( menu_func )
+	bpy.types.INFO_MT_file_import.append( menuFunc )
 
 def unregister():
 	bpy.utils.unregister_class( VmdImporter )
-	bpy.types.INFO_MT_file_import.remove( menu_func )
+	bpy.types.INFO_MT_file_import.remove( menuFunc )
 
 if __name__ == "__main__":
 	register()
