@@ -14,9 +14,13 @@
 #     - http://atupdate.web.fc2.com/vmd_format.htm
 #     - http://blog.goo.ne.jp/torisu_tetosuki/e/bc9f1c4d597341b394bd02b64597499d
 #     - http://harigane.at.webry.info/201103/article_1.html
+#     - http://d.hatena.ne.jp/ousttrue/20100405/1270465133
 #
 # This program can be used with excellent PMD importer "MeshIO":
 #     - http://sourceforge.jp/projects/meshio/
+#
+# Thanks for reporting bugs & sending patches:
+#     - Thibaud de Souza (Tea for Anime 3D SFX)
 
 import io
 import struct
@@ -56,6 +60,7 @@ def importVmdBone( ofs, obj, offset ):
 	baseRot = { b.name: b.matrix_local.to_quaternion() for b in obj.data.bones }
 
 	frameEnd = offset
+	prevRot = mathutils.Quaternion( (1.0, 0.0, 0.0, 0.0) )
 	size, = readPacked( ofs, "< I" )
 	for _ in range( size ):
 		name, frame, tx, ty, tz, rx, ry, rz, rw, _ = readPacked( ofs, "< 15s I 3f 4f 64s" )
@@ -63,14 +68,18 @@ def importVmdBone( ofs, obj, offset ):
 		name = boneNameMap.get( name, name )
 		frame += offset
 		if name in obj.pose.bones:
+			nextRot = mathutils.Quaternion( (rw, -rx, -rz, -ry) )
+			# quaternion q and -q represent the same rotation,
+			# we choose the nearer one to the previous one
+			if prevRot.dot( nextRot ) < 0.0:
+				nextRot = -nextRot
+			prevRot = nextRot
+
 			bone = obj.pose.bones[name]
 			bone.location = mathutils.Vector( (tx, tz, ty) )
 			# transform basis of rotation
-			bone.rotation_quaternion = (
-				baseRot[name].conjugated() *
-				mathutils.Quaternion( (rw, -rx, -rz, -ry) ) *
-				baseRot[name]
-			)
+			bone.rotation_quaternion = baseRot[name].conjugated() * nextRot * baseRot[name]
+
 			bone.keyframe_insert( "location", frame = frame )
 			bone.keyframe_insert( "rotation_quaternion", frame = frame )
 
