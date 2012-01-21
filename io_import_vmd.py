@@ -1,4 +1,4 @@
-# VMD (Vocaloid Motion Data) importer for Blender 2.5
+# VMD (Vocaloid Motion Data) importer for Blender 2.5+
 # by y.fujii <y-fujii at mimosa-pudica.net>, public domain
 #
 # Usage:
@@ -25,6 +25,7 @@
 import io
 import struct
 import mathutils
+import sys
 import bpy
 import bpy_extras
 try:
@@ -32,7 +33,8 @@ try:
 	boneNameMap = { t[1]: t[0] for t in englishmap.boneMap }
 	faceNameMap = { t[1]: t[0] for t in englishmap.skinMap }
 except:
-	print( "MeshIO is not found." )
+	sys.stderr.write( "MeshIO is not found.\n" )
+	sys.stderr.flush()
 	boneNameMap = {}
 	faceNameMap = {}
 
@@ -52,90 +54,99 @@ def choice1( it, cond ):
 def readPacked( ofs, fmt ):
 	return struct.unpack( fmt, ofs.read( struct.calcsize( fmt ) ) )
 
-def vmdStr( s ):
-	i = s.index( b"\0" )
-	return str( s[:i], "shift-jis" )
 
-def importVmdBone( ofs, obj, offset ):
-	baseRot = { b.name: b.matrix_local.to_quaternion() for b in obj.data.bones }
+class VmdLoader( object ):
 
-	frameEnd = offset
-	prevRot = mathutils.Quaternion( (1.0, 0.0, 0.0, 0.0) )
-	size, = readPacked( ofs, "< I" )
-	for _ in range( size ):
-		name, frame, tx, ty, tz, rx, ry, rz, rw, _ = readPacked( ofs, "< 15s I 3f 4f 64s" )
-		name = vmdStr( name )
-		name = boneNameMap.get( name, name )
-		frame += offset
-		if name in obj.pose.bones:
-			nextRot = mathutils.Quaternion( (rw, -rx, -rz, -ry) )
-			# quaternion q and -q represent the same rotation,
-			# we choose the nearer one to the previous one
-			if prevRot.dot( nextRot ) < 0.0:
-				nextRot = -nextRot
-			prevRot = nextRot
+	@classmethod
+	def loadStr( cls, s ):
+		i = s.index( b"\0" )
+		return str( s[:i], "cp932" )
 
-			bone = obj.pose.bones[name]
-			bone.location = mathutils.Vector( (tx, tz, ty) )
-			# transform basis of rotation
-			bone.rotation_quaternion = baseRot[name].conjugated() * nextRot * baseRot[name]
+	@classmethod
+	def loadBone( cls, ofs, obj, offset ):
+		baseRot = { b.name: b.matrix_local.to_quaternion() for b in obj.data.bones }
 
-			bone.keyframe_insert( "location", frame = frame )
-			bone.keyframe_insert( "rotation_quaternion", frame = frame )
+		frameEnd = offset
+		prevRot = mathutils.Quaternion( (1.0, 0.0, 0.0, 0.0) )
+		size, = readPacked( ofs, "< I" )
+		for _ in range( size ):
+			name, frame, tx, ty, tz, rx, ry, rz, rw, _ = readPacked( ofs, "< 15s I 3f 4f 64s" )
+			name = cls.loadStr( name )
+			name = boneNameMap.get( name, name )
+			frame += offset
+			if name in obj.pose.bones:
+				nextRot = mathutils.Quaternion( (rw, -rx, -rz, -ry) )
+				# quaternion q and -q represent the same rotation,
+				# we choose the nearer one to the previous one
+				if prevRot.dot( nextRot ) < 0.0:
+					nextRot = -nextRot
+				prevRot = nextRot
 
-		frameEnd = max( frameEnd, frame )
-	
-	return frameEnd
+				bone = obj.pose.bones[name]
+				bone.location = mathutils.Vector( (tx, tz, ty) )
+				bone.rotation_mode = "QUATERNION"
+				# transform basis of rotation
+				bone.rotation_quaternion = baseRot[name].conjugated() * nextRot * baseRot[name]
 
-def skipVmdBone( ofs ):
-	size, = readPacked( ofs, "< I" )
-	ofs.seek( struct.calcsize( "< 15s I 3f 4f 64s" ) * size, 1 )
+				bone.keyframe_insert( "location", frame = frame )
+				bone.keyframe_insert( "rotation_quaternion", frame = frame )
 
-def importVmdFace( ofs, obj, offset ):
-	frameEnd = offset
-	size, = readPacked( ofs, "< I" )
-	for _ in range( size ):
-		name, frame, value = readPacked( ofs, "< 15s I f" )
-		name = vmdStr( name )
-		name = faceNameMap.get( name, name )
-		frame += offset
-		if name in obj.data.shape_keys.key_blocks:
-			block = obj.data.shape_keys.key_blocks[name]
-			block.value = value
-			block.keyframe_insert( "value", frame = frame )
+			frameEnd = max( frameEnd, frame )
+		
+		return frameEnd
 
-		frameEnd = max( frameEnd, frame )
+	@classmethod
+	def skipBone( cls, ofs ):
+		size, = readPacked( ofs, "< I" )
+		ofs.seek( struct.calcsize( "< 15s I 3f 4f 64s" ) * size, 1 )
 
-	return frameEnd
+	@classmethod
+	def loadFace( cls, ofs, obj, offset ):
+		frameEnd = offset
+		size, = readPacked( ofs, "< I" )
+		for _ in range( size ):
+			name, frame, value = readPacked( ofs, "< 15s I f" )
+			name = cls.loadStr( name )
+			name = faceNameMap.get( name, name )
+			frame += offset
+			if name in obj.data.shape_keys.key_blocks:
+				block = obj.data.shape_keys.key_blocks[name]
+				block.value = value
+				block.keyframe_insert( "value", frame = frame )
 
-def skipVmdFace( ofs ):
-	size, = readPacked( ofs, "< I" )
-	ofs.seek( struct.calcsize( "< 15s I f" ) * size, 1 )
+			frameEnd = max( frameEnd, frame )
 
-def importVmd( ofs, bone, face, offset = 0 ):
-	magic, name = readPacked( ofs, "< 30s 20s" )
-	magic = vmdStr( magic )
-	#name = vmdStr( name )
-	if not magic.startswith( "Vocaloid Motion Data" ):
-		raise IOError()
+		return frameEnd
 
-	if bone:
-		fe0 = importVmdBone( ofs, bone, offset )
-	else:
-		skipVmdBone( ofs )
-		fe0 = offset
+	@classmethod
+	def skipFace( cls, ofs ):
+		size, = readPacked( ofs, "< I" )
+		ofs.seek( struct.calcsize( "< 15s I f" ) * size, 1 )
 
-	if face:
-		fe1 = importVmdFace( ofs, face, offset )
-	else:
-		skipVmdFace( ofs )
-		fe1 = offset
+	@classmethod
+	def load( cls, ofs, bone, face, offset = 0 ):
+		magic, name = readPacked( ofs, "< 30s 20s" )
+		magic = cls.loadStr( magic )
+		#name = cls.loadStr( name )
+		if not magic.startswith( "Vocaloid Motion Data" ):
+			raise IOError()
 
-	bpy.context.scene.frame_end = max( fe0, fe1, bpy.context.scene.frame_end )
+		if bone:
+			fe0 = cls.loadBone( ofs, bone, offset )
+		else:
+			cls.skipBone( ofs )
+			fe0 = offset
 
-# UI
+		if face:
+			fe1 = cls.loadFace( ofs, face, offset )
+		else:
+			cls.skipFace( ofs )
+			fe1 = offset
 
-class VmdImporter( bpy.types.Operator, bpy_extras.io_utils.ImportHelper ):
+		return max( fe0, fe1 )
+
+
+class VmdImporterUi( bpy.types.Operator, bpy_extras.io_utils.ImportHelper ):
 	bl_idname    = "import_anim.vmd"
 	bl_label     = "Import VMD"
 	filter_glob  = bpy.props.StringProperty( default = "*.vmd", options = { "HIDDEN" } )
@@ -150,19 +161,21 @@ class VmdImporter( bpy.types.Operator, bpy_extras.io_utils.ImportHelper ):
 		)
 
 		with io.FileIO( self.filepath ) as ofs:
-			importVmd( ofs, bone, face, self.frame_offset )
+			frameEnd = VmdLoader.load( ofs, bone, face, self.frame_offset )
+			bpy.context.scene.frame_end = max( frameEnd, bpy.context.scene.frame_end )
 
 		return { "FINISHED" }
 
+
 def menuFunc( self, ctx ):
-	self.layout.operator( VmdImporter.bl_idname, text = "Vocaloid Motion Data (.vmd)" )
+	self.layout.operator( VmdImporterUi.bl_idname, text = "Vocaloid Motion Data (.vmd)" )
 
 def register():
-	bpy.utils.register_class( VmdImporter )
+	bpy.utils.register_class( VmdImporterUi )
 	bpy.types.INFO_MT_file_import.append( menuFunc )
 
 def unregister():
-	bpy.utils.unregister_class( VmdImporter )
+	bpy.utils.unregister_class( VmdImporterUi )
 	bpy.types.INFO_MT_file_import.remove( menuFunc )
 
 if __name__ == "__main__":
