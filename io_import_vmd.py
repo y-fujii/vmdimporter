@@ -45,6 +45,13 @@ bl_info = {
 }
 
 
+class Slot( object ):
+
+	def __init__( self, **kws ):
+		for k, v in kws.items():
+			setattr( self, k, v )
+
+
 def choice1( it, cond ):
 	for e in it:
 		if cond( e ):
@@ -64,10 +71,13 @@ class VmdLoader( object ):
 
 	@classmethod
 	def loadBone( cls, ofs, obj, offset ):
-		baseRot = { b.name: b.matrix_local.to_quaternion() for b in obj.data.bones }
-
+		infos = {
+			b.name: Slot(
+				baseRot = b.matrix_local.to_quaternion(),
+				prevRot = mathutils.Quaternion( (1.0, 0.0, 0.0, 0.0) ),
+			) for b in obj.data.bones
+		}
 		frameEnd = offset
-		prevRot = mathutils.Quaternion( (1.0, 0.0, 0.0, 0.0) )
 		size, = readPacked( ofs, "< I" )
 		for _ in range( size ):
 			name, frame, tx, ty, tz, rx, ry, rz, rw, _ = readPacked( ofs, "< 15s I 3f 4f 64s" )
@@ -75,19 +85,20 @@ class VmdLoader( object ):
 			name = boneNameMap.get( name, name )
 			frame += offset
 			if name in obj.pose.bones:
-				nextRot = mathutils.Quaternion( (rw, -rx, -rz, -ry) )
+				info = infos[name]
+				bone = obj.pose.bones[name]
+
+				rot = mathutils.Quaternion( (rw, -rx, -rz, -ry) )
 				# quaternion q and -q represent the same rotation,
 				# we choose the nearer one to the previous one
-				if prevRot.dot( nextRot ) < 0.0:
-					nextRot = -nextRot
-				prevRot = nextRot
+				if info.prevRot.dot( rot ) < 0.0:
+					rot = -rot
+				info.prevRot = rot
 
-				bone = obj.pose.bones[name]
 				bone.location = mathutils.Vector( (tx, tz, ty) )
 				bone.rotation_mode = "QUATERNION"
 				# transform basis of rotation
-				bone.rotation_quaternion = baseRot[name].conjugated() * nextRot * baseRot[name]
-
+				bone.rotation_quaternion = info.baseRot.conjugated() * rot * info.baseRot
 				bone.keyframe_insert( "location", frame = frame )
 				bone.keyframe_insert( "rotation_quaternion", frame = frame )
 
