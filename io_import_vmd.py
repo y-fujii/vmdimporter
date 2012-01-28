@@ -83,6 +83,7 @@ class VmdLoader( object ):
 
 			frames.sort()
 			bone = obj.pose.bones[name]
+			bone.rotation_mode = "QUATERNION"
 			baseRot = bone.bone.matrix_local.to_quaternion()
 			prevRot = mathutils.Quaternion( (1.0, 0.0, 0.0, 0.0) )
 			for (time, loc, rot) in frames:
@@ -93,7 +94,6 @@ class VmdLoader( object ):
 				prevRot = rot
 
 				bone.location = loc
-				bone.rotation_mode = "QUATERNION"
 				# transform basis of rotation
 				bone.rotation_quaternion = baseRot.conjugated() * rot * baseRot
 				bone.keyframe_insert( "location",            frame = time + offset )
