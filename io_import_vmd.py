@@ -65,27 +65,27 @@ class VmdLoader( object ):
 
 	@classmethod
 	def loadBone( cls, ofs, obj, offset ):
-		frameEnd = 0
+		timeEnd = 0
 		data = collections.defaultdict( list )
 		size, = readPacked( ofs, "< I" )
 		for _ in range( size ):
-			name, frame, tx, ty, tz, rx, ry, rz, rw, _ = readPacked( ofs, "< 15s I 3f 4f 64s" )
+			name, time, tx, ty, tz, rx, ry, rz, rw, _ = readPacked( ofs, "< 15s I 3f 4f 64s" )
 			name = cls.loadStr( name )
 			loc = mathutils.Vector( (tx, tz, ty) )
 			rot = mathutils.Quaternion( (rw, -rx, -rz, -ry) )
-			data[name].append( (frame, loc, rot) )
-			frameEnd = max( frameEnd, frame )
+			data[name].append( (time, loc, rot) )
+			timeEnd = max( timeEnd, time )
 
-		for name, data in data.items():
+		for name, frames in data.items():
 			name = boneNameMap.get( name, name )
 			if not name in obj.pose.bones:
 				continue
 
-			data.sort()
+			frames.sort()
 			bone = obj.pose.bones[name]
 			baseRot = bone.bone.matrix_local.to_quaternion()
 			prevRot = mathutils.Quaternion( (1.0, 0.0, 0.0, 0.0) )
-			for (frame, loc, rot) in data:
+			for (time, loc, rot) in frames:
 				# quaternion q and -q represent the same rotation,
 				# we choose the nearer one to the previous one
 				if prevRot.dot( rot ) < 0.0:
@@ -96,10 +96,10 @@ class VmdLoader( object ):
 				bone.rotation_mode = "QUATERNION"
 				# transform basis of rotation
 				bone.rotation_quaternion = baseRot.conjugated() * rot * baseRot
-				bone.keyframe_insert( "location",            frame = frame + offset )
-				bone.keyframe_insert( "rotation_quaternion", frame = frame + offset )
+				bone.keyframe_insert( "location",            frame = time + offset )
+				bone.keyframe_insert( "rotation_quaternion", frame = time + offset )
 		
-		return frameEnd + offset
+		return timeEnd + offset
 
 	@classmethod
 	def skipBone( cls, ofs ):
@@ -108,21 +108,20 @@ class VmdLoader( object ):
 
 	@classmethod
 	def loadFace( cls, ofs, obj, offset ):
-		frameEnd = offset
+		timeEnd = 0
 		size, = readPacked( ofs, "< I" )
 		for _ in range( size ):
-			name, frame, value = readPacked( ofs, "< 15s I f" )
+			name, time, value = readPacked( ofs, "< 15s I f" )
 			name = cls.loadStr( name )
 			name = faceNameMap.get( name, name )
-			frame += offset
 			if name in obj.data.shape_keys.key_blocks:
 				block = obj.data.shape_keys.key_blocks[name]
 				block.value = value
-				block.keyframe_insert( "value", frame = frame )
+				block.keyframe_insert( "value", frame = time + offset )
 
-			frameEnd = max( frameEnd, frame )
+			timeEnd = max( timeEnd, time )
 
-		return frameEnd
+		return timeEnd + offset
 
 	@classmethod
 	def skipFace( cls, ofs ):
