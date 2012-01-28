@@ -24,6 +24,7 @@
 
 import io
 import struct
+import collections
 import mathutils
 import sys
 import bpy
@@ -71,40 +72,41 @@ class VmdLoader( object ):
 
 	@classmethod
 	def loadBone( cls, ofs, obj, offset ):
-		infos = {
-			b.name: Slot(
-				baseRot = b.matrix_local.to_quaternion(),
-				prevRot = mathutils.Quaternion( (1.0, 0.0, 0.0, 0.0) ),
-			) for b in obj.data.bones
-		}
-		frameEnd = offset
+		frameEnd = 0
+		data = collections.defaultdict( list )
 		size, = readPacked( ofs, "< I" )
 		for _ in range( size ):
 			name, frame, tx, ty, tz, rx, ry, rz, rw, _ = readPacked( ofs, "< 15s I 3f 4f 64s" )
 			name = cls.loadStr( name )
-			name = boneNameMap.get( name, name )
-			frame += offset
-			if name in obj.pose.bones:
-				info = infos[name]
-				bone = obj.pose.bones[name]
+			loc = mathutils.Vector( (tx, tz, ty) )
+			rot = mathutils.Quaternion( (rw, -rx, -rz, -ry) )
+			data[name].append( (frame, loc, rot) )
+			frameEnd = max( frameEnd, frame )
 
-				rot = mathutils.Quaternion( (rw, -rx, -rz, -ry) )
+		for name, data in data.items():
+			name = boneNameMap.get( name, name )
+			if not name in obj.pose.bones:
+				continue
+
+			data.sort()
+			bone = obj.pose.bones[name]
+			baseRot = bone.bone.matrix_local.to_quaternion()
+			prevRot = mathutils.Quaternion( (1.0, 0.0, 0.0, 0.0) )
+			for (frame, loc, rot) in data:
 				# quaternion q and -q represent the same rotation,
 				# we choose the nearer one to the previous one
-				if info.prevRot.dot( rot ) < 0.0:
+				if prevRot.dot( rot ) < 0.0:
 					rot = -rot
-				info.prevRot = rot
+				prevRot = rot
 
-				bone.location = mathutils.Vector( (tx, tz, ty) )
+				bone.location = loc
 				bone.rotation_mode = "QUATERNION"
 				# transform basis of rotation
-				bone.rotation_quaternion = info.baseRot.conjugated() * rot * info.baseRot
-				bone.keyframe_insert( "location", frame = frame )
-				bone.keyframe_insert( "rotation_quaternion", frame = frame )
-
-			frameEnd = max( frameEnd, frame )
+				bone.rotation_quaternion = baseRot.conjugated() * rot * baseRot
+				bone.keyframe_insert( "location",            frame = frame + offset )
+				bone.keyframe_insert( "rotation_quaternion", frame = frame + offset )
 		
-		return frameEnd
+		return frameEnd + offset
 
 	@classmethod
 	def skipBone( cls, ofs ):
