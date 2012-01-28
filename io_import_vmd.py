@@ -46,13 +46,6 @@ bl_info = {
 }
 
 
-class Slot( object ):
-
-	def __init__( self, **kws ):
-		for k, v in kws.items():
-			setattr( self, k, v )
-
-
 def choice1( it, cond ):
 	for e in it:
 		if cond( e ):
